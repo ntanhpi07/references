@@ -1,0 +1,3 @@
+.logmech ldap;
+.logdata authcid=p806894 password=$tdwallet(tdprd);
+.logon tdprd/p806894
