@@ -1,0 +1,286 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.DirectoryServices;
+using System.DirectoryServices.AccountManagement;
+
+namespace GetSomeADObjects
+{
+    class Program
+    {
+        static String S_TILDE = "~";
+
+        static String m_strColumnHeader = "DN~Name~SamAccountName~EmployeeID~EmployeeType~Department~Email~ExtensionAttr2~Comment~BusinessCategory~DeliveryOffice~Delegate~Description~Enabled~PwdNeverExpires~PwdNotRequired~UserCannotChangePwd~WhenCreated~WhenChanged~PwdLastSet" + Environment.NewLine;
+
+
+        public static Int64 ConvertADSLargeIntegerToInt64(object adsLargeInteger)
+        {
+            var highPart = (Int32)adsLargeInteger.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, adsLargeInteger, null);
+            var lowPart = (Int32)adsLargeInteger.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, adsLargeInteger, null);
+            return highPart * ((Int64)UInt32.MaxValue + 1) + lowPart;
+        }
+
+        static void Main(string[] args)
+        {
+            String strWorkingDirectory = Directory.GetCurrentDirectory();
+            String strUserFile = strWorkingDirectory + @"\UserInput.txt";
+            String strUserTracker = strWorkingDirectory + @"\UserTracker.txt";
+            String strADUsers = strWorkingDirectory + @"\ADAccounts.txt";
+            String strConfigurationFile = strWorkingDirectory + @"\ConfigurationDetails.txt";
+
+            //Default Domain Controller
+            String strDomain = "";
+            String strRootSuffix = "";
+            String strUserAccount = "";
+            String strPassword = "";
+            Console.WriteLine("Current Working Directory is [" + strWorkingDirectory + "]");
+
+            // Read from the DomainController File to determine the DC to use
+            try
+            {   // Open the Group Tracker File and get 
+                using (StreamReader sr = new StreamReader(strConfigurationFile))
+                {
+                    // Read the stream to a string, and write the string to the console.
+                    strDomain = sr.ReadLine();
+                    strRootSuffix = sr.ReadLine();
+                    strUserAccount = sr.ReadLine();
+                    strPassword = sr.ReadLine();
+
+                    Console.WriteLine("Using DC [" + strDomain + "]");
+                    Console.WriteLine("Using root suffix [" + strRootSuffix + "]");
+                    Console.WriteLine("User Account [" + strUserAccount + "]");
+                    Console.WriteLine("Using Password [XXXXXXXXX]");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("The Configuration File could not be found");
+                throw (e);
+            }
+
+            // Read from the User Tracker File to determine last processed user
+            int iLastUserProcessed = 0;
+
+            try
+            {   // Open the User Tracker File and get 
+                using (StreamReader sr = new StreamReader(strUserTracker))
+                {
+                    // Read the stream to a string, and write the string to the console.
+                    String line = sr.ReadToEnd();
+                    iLastUserProcessed = Int32.Parse(line);
+
+                    Console.WriteLine("User Tracking file found.  Last User Processed was [" + iLastUserProcessed.ToString() + "]");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("The User Tracking File could not be located.  Starting with User [1].");
+                iLastUserProcessed = 0;
+            }
+            // Connect to a Domain Controller
+            PrincipalContext ctx = new PrincipalContext(ContextType.Domain,
+                strDomain,
+                strRootSuffix,
+                ContextOptions.Negotiate);
+
+            String strWCR = "whenCreated";
+            String strWhenCreated = String.Empty;
+            String strWCH = "whenChanged";
+            String strWhenChanged = String.Empty;
+            String strDPT = "department";
+            String strDeparment = String.Empty;
+            String strETYPE = "employeetype";
+            String strEmployeeType = String.Empty;
+            String strEA2 = "extensionAttribute2";
+            String strExtensionAttribute2 = String.Empty;
+            String strCMT = "comment";
+            String strComment = String.Empty;
+            String strBCT = "businessCategory";
+            String strBusinessCategory = String.Empty;
+            String strPON = "physicalDeliveryOfficeName";
+            String strPhysicalDeliveryOName = String.Empty;
+            String strPDL = "publicDelegatesBL";
+            String strPublicDelegates = String.Empty;
+            String strDSC = "description";
+            String strDescription = String.Empty;
+            String strLLT = "lastLogonTimestamp";
+            String strLastLogonTimeStamp = String.Empty;
+            
+            DateTime? dtPasswordLastSet = null;
+            /*
+             * String strPLS = "pwdLastSet";
+            String strAEX = "accountExpires";
+            String strBPT = "badPasswordTime";
+           
+            String strUAC = "userAccountControl";
+            */
+
+            StringBuilder sbMessage = new StringBuilder();
+            Boolean bContinue = true;
+            int iTotalUsers = 0;
+            String strUserToProcess = String.Empty;
+            UserPrincipal user = null;
+
+            //var searchUserPrinciple = new UserPrincipal(ctx);
+
+            //PrincipalSearcher srchUser = new PrincipalSearcher(searchUserPrinciple);
+            //var searchResults = srchUser.FindAll();
+           
+            DateTime dtPwdLastSet = DateTime.MinValue;
+
+            if (!(File.Exists(strUserFile)))
+            {
+                Console.WriteLine("UserInput File could not be located at [" + strUserFile + "].  Exiting.");
+                bContinue = false;
+            }
+            else
+            {
+                iTotalUsers = File.ReadLines(strUserFile).Count();
+            }
+
+            while (bContinue)
+            {
+                // Read from the Group Input File and advance to next group to process
+                try
+                {   // Open the Group Tracker File and get 
+                    int iNextUserToProcess = iLastUserProcessed + 1;
+
+                    using (StreamReader sr = new StreamReader(strUserFile))
+                    {
+                        // Advance the reader to the next group to be processed
+                        for (int i = 1; i < iNextUserToProcess; i++)
+                        {
+                            sr.ReadLine();    // No care of what these values are just advancing the reader
+                        }
+
+                        strUserToProcess = sr.ReadLine();
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Unplanned Exception [" + e.ToString() + "] continue on.");
+                    bContinue = false;
+                    continue;
+                }
+
+                if (null == strUserToProcess)
+                {
+                    Console.WriteLine("Reached the end of the Users File.  We're done.");
+                    bContinue = false;
+                    continue;
+                }
+                // We have a User to Process.  Time to get the details
+                user = UserPrincipal.FindByIdentity(ctx, IdentityType.DistinguishedName, strUserToProcess);
+
+                if (user != null)
+                {
+                    DirectoryEntry directoryEntry = user.GetUnderlyingObject() as DirectoryEntry;
+                    if (directoryEntry.Properties.Contains(strDPT))
+                        strDeparment = directoryEntry.Properties[strDPT].Value.ToString();
+                    else
+                        strDeparment = String.Empty;
+                    if (directoryEntry.Properties.Contains(strETYPE))
+                        strEmployeeType = directoryEntry.Properties[strETYPE].Value.ToString();
+                    else
+                        strEmployeeType = String.Empty;
+                    if (directoryEntry.Properties.Contains(strWCR))
+                        strWhenCreated = directoryEntry.Properties[strWCR].Value.ToString();
+                    else
+                        strWhenCreated = String.Empty;
+                    if (directoryEntry.Properties.Contains(strWCH))
+                        strWhenChanged = directoryEntry.Properties[strWCH].Value.ToString();
+                    else
+                        strWhenChanged = String.Empty;
+                    if (directoryEntry.Properties.Contains(strEA2))
+                        strExtensionAttribute2 = directoryEntry.Properties[strEA2].Value.ToString();
+                    else
+                        strExtensionAttribute2 = String.Empty;
+                    if (directoryEntry.Properties.Contains(strCMT))
+                    {
+                        strComment = directoryEntry.Properties[strCMT].Value.ToString();
+                        strComment = strComment.Replace("~", String.Empty);
+                        strComment = strComment.Replace("\'", String.Empty);
+                        strComment = strComment.Replace("\"", String.Empty);
+                        strComment = strComment.Replace("\n", String.Empty);
+                        strComment = strComment.Replace("\r", String.Empty);
+                        strComment = strComment.Replace("\t", String.Empty);
+                    }
+                    else
+                        strComment = String.Empty;
+                    if (directoryEntry.Properties.Contains(strBCT))
+                        strBusinessCategory = directoryEntry.Properties[strBCT].Value.ToString();
+                    else
+                        strBusinessCategory = String.Empty;
+                    if (directoryEntry.Properties.Contains(strPON))
+                        strPhysicalDeliveryOName = directoryEntry.Properties[strPON].Value.ToString();
+                    else
+                        strPhysicalDeliveryOName = String.Empty;
+                    if (directoryEntry.Properties.Contains(strPDL))
+                        strPublicDelegates = directoryEntry.Properties[strPDL].Value.ToString();
+                    else
+                        strPublicDelegates = String.Empty;
+                    if (directoryEntry.Properties.Contains(strLLT))
+                        strLastLogonTimeStamp = directoryEntry.Properties[strLLT].Value.ToString();
+                    else
+                        strLastLogonTimeStamp = String.Empty;
+
+                    if (directoryEntry.Properties.Contains(strDSC))
+                    {
+                        strDescription = directoryEntry.Properties[strDSC].Value.ToString();
+                        strDescription = strDescription.Replace("~", String.Empty);
+                        strDescription = strDescription.Replace("\'", String.Empty);
+                        strDescription = strDescription.Replace("\"", String.Empty);
+                        strDescription = strDescription.Replace("\n", String.Empty);
+                        strDescription = strDescription.Replace("\r", String.Empty);
+                        strDescription = strDescription.Replace("\t", String.Empty);
+                    }
+                    else
+                        strDescription = String.Empty;
+
+                    dtPasswordLastSet = (DateTime?)user.LastPasswordSet;
+                    ////user.LastLogon;
+
+                    sbMessage.Append(user.DistinguishedName); sbMessage.Append(S_TILDE); sbMessage.Append(user.DisplayName); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(user.SamAccountName); sbMessage.Append(S_TILDE); sbMessage.Append(user.EmployeeId); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(strEmployeeType); sbMessage.Append(S_TILDE); sbMessage.Append(strDeparment); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(user.EmailAddress); sbMessage.Append(S_TILDE); sbMessage.Append(strExtensionAttribute2); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(strComment); sbMessage.Append(S_TILDE); sbMessage.Append(strBusinessCategory); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(strPhysicalDeliveryOName); sbMessage.Append(S_TILDE); sbMessage.Append(strPublicDelegates); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(strDescription); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(((bool)user.Enabled) ? "TRUE" : "FALSE"); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(user.PasswordNeverExpires ? "TRUE" : "FALSE"); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(user.PasswordNotRequired ? "TRUE" : "FALSE"); sbMessage.Append(S_TILDE);
+                    sbMessage.Append(user.UserCannotChangePassword ? "TRUE" : "FALSE"); sbMessage.Append(S_TILDE);
+
+                    sbMessage.Append(strWhenCreated); sbMessage.Append(S_TILDE); sbMessage.Append(strWhenChanged); sbMessage.Append(S_TILDE); sbMessage.Append(dtPasswordLastSet.ToString());
+                    sbMessage.Append(Environment.NewLine);
+
+                    // Write membership records to the GroupAssignments file
+                    if (!File.Exists(strADUsers))
+                        File.WriteAllText(strADUsers, m_strColumnHeader);
+
+                    File.AppendAllText(strADUsers, sbMessage.ToString());
+                    sbMessage.Clear();
+
+                    user.Dispose();
+                }
+                else
+                {
+                    Console.WriteLine("Looks like this user is gone [" + strUserToProcess + "]");
+                }
+
+                // This user has been processed update the User Tracker File to indicate.
+                // Write membership records to the file
+                iLastUserProcessed++;
+                File.WriteAllText(strUserTracker, Convert.ToString(iLastUserProcessed));    // Only a single number for this entire file
+
+            }
+
+            ctx.Dispose();
+
+        }
+    }
+}

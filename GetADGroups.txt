@@ -1,0 +1,271 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.DirectoryServices;
+using System.DirectoryServices.AccountManagement;
+
+namespace GetSomeADObjects
+{
+    class Program
+    {
+        static void Main(string[] args)
+		{
+			String strWorkingDirectory = Directory.GetCurrentDirectory();
+			String strADGroups = strWorkingDirectory + @"\ADGroups.txt";
+
+			String strConfigurationFile = strWorkingDirectory + @"\ConfigurationDetails.txt";
+
+			//Default Domain Controller
+			String strDomain = "";
+			String strRootSuffix = "";
+			String strUserAccount = "";
+			String strPassword = "";
+            Console.WriteLine("Current Working Directory is [" + strWorkingDirectory + "]");
+
+            // Read from the DomainController File to determine the DC to use
+            try
+            {   // Open the Group Tracker File and get 
+                using (StreamReader sr = new StreamReader(strConfigurationFile))
+                {
+                    // Read the stream to a string, and write the string to the console.
+                    strDomain = sr.ReadLine();
+                    strRootSuffix = sr.ReadLine();
+                    strUserAccount = sr.ReadLine();
+                    strPassword = sr.ReadLine();
+
+                    Console.WriteLine("Using DC [" + strDomain + "]");
+                    Console.WriteLine("Using root suffix [" + strRootSuffix + "]");
+                    Console.WriteLine("User Account [" + strUserAccount + "]");
+                    Console.WriteLine("Using Password [XXXXXXXXX]");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("The Configuration File could not be found");
+                throw (e);
+            }
+
+			// Connect to a Domain Controller
+			PrincipalContext ctx = new PrincipalContext(ContextType.Domain,
+				strDomain,
+				strRootSuffix,
+                ContextOptions.Negotiate);
+
+			//String strMessage = null;
+            //String strTempRootSuffix = strRootSuffix.Replace(",",String.Empty);
+            //strTempRootSuffix = strTempRootSuffix.Replace("dc", String.Empty);
+            string[] strAry = strRootSuffix.Split(',');
+            String strTopContainer = strAry[0];
+
+			var searchGroupPrinciple = new GroupPrincipal(ctx);
+			PrincipalSearcher srchGroup = new PrincipalSearcher(searchGroupPrinciple);
+			var searchResults = srchGroup.FindAll();
+            String strGroupType = String.Empty;
+            String strGroupScope = String.Empty;
+            String strGroupManagedBy = String.Empty;
+            String strContainer1 = String.Empty;
+            String strContainer2 = String.Empty;
+            String strContainer3 = String.Empty;
+            String strContainer4 = String.Empty;
+            String strContainer5 = String.Empty;
+            String strContainer6 = String.Empty;
+            String strContainer7 = String.Empty;
+            String strContainer8 = String.Empty;
+            String strMBR = "member";
+            //String strGPITYP = "grouptype";
+            //String stGroupInternalType = String.Empty;
+            String strEmpty = "NO";
+            StringBuilder sbMessage = new StringBuilder();
+            String strMBY = "managedBy";
+            String strManagedBy = String.Empty;
+            String strINFO = "Info";
+            String strInformation = String.Empty;
+            String strDESC = "Description";
+            String strDescription = String.Empty;
+            String strWCR = "whenCreated";
+            String strWhenCreated = String.Empty;
+            String strWCH = "whenChanged";
+            String strWhenChanged = String.Empty;
+            String strColumnHeader = "DN~EMPTY~AsIsMemberCount~Container1~Container2~Container3~Container4~Container5~Container6~Container7~Container8~Name~SamAccountName~Type~Scope~ManagedBy~Info~Description~WhenCreated~WhenChanged" + Environment.NewLine;
+            int iMembers = 0;
+            Stack<string> stkContainers = new Stack<string>();
+            String strTempContainer = String.Empty;
+
+            try
+            {
+                foreach (Principal p in searchResults)
+                {
+                    // cast to GroupPrincipal
+                    GroupPrincipal gp = (p as GroupPrincipal);
+
+                    if ((bool)gp.IsSecurityGroup)
+                        strGroupType = "Security";
+                    else
+                        strGroupType = "Distribution";
+
+                    if (GroupScope.Global == gp.GroupScope)
+                        strGroupScope = "Global";
+                    else if (GroupScope.Local == gp.GroupScope)
+                        strGroupScope = "Local";
+                    else if (GroupScope.Universal == gp.GroupScope)
+                        strGroupScope = "Universal";
+
+                    DirectoryEntry directoryEntry = p.GetUnderlyingObject() as DirectoryEntry;
+                    if (directoryEntry.Properties.Contains(strMBY))
+                        strGroupManagedBy = directoryEntry.Properties[strMBY].Value.ToString();
+                    else
+                        strGroupManagedBy = String.Empty;
+
+                    /*
+                    if (directoryEntry.Properties.Contains(strGPITYP))
+                    {
+                        stGroupInternalType = directoryEntry.Properties[strGPITYP].Value.ToString();
+                        Console.WriteLine(stGroupInternalType);
+                        // 268435456  268435457   536870912
+                    }
+                     */
+
+                    if (directoryEntry.Properties.Contains(strINFO))
+                    {
+                        strInformation = directoryEntry.Properties[strINFO].Value.ToString();
+                        strInformation = strInformation.Replace("~", String.Empty);
+                        strInformation = strInformation.Replace("\'", String.Empty);
+                        strInformation = strInformation.Replace("\"", String.Empty);
+                        strInformation = strInformation.Replace("\n", String.Empty);
+                        strInformation = strInformation.Replace("\r", String.Empty);
+                        strInformation = strInformation.Replace("\t", String.Empty);
+                    }
+                    else
+                        strInformation = String.Empty;
+
+                    if (directoryEntry.Properties.Contains(strDESC))
+                    {
+                        strDescription = directoryEntry.Properties[strDESC].Value.ToString();
+                        strDescription = strInformation.Replace("~", String.Empty);
+                        strDescription = strInformation.Replace("\'", String.Empty);
+                        strDescription = strInformation.Replace("\"", String.Empty);
+                        strDescription = strInformation.Replace("\n", String.Empty);
+                        strDescription = strInformation.Replace("\r", String.Empty);
+                        strDescription = strInformation.Replace("\t", String.Empty);
+                    }
+                    else
+                        strInformation = String.Empty;
+
+                    if (directoryEntry.Properties.Contains(strWCR))
+                        strWhenCreated = directoryEntry.Properties[strWCR].Value.ToString();
+                    else
+                        strWhenCreated = String.Empty;
+                    if (directoryEntry.Properties.Contains(strWCH))
+                        strWhenChanged = directoryEntry.Properties[strWCH].Value.ToString();
+                    else
+                        strWhenChanged = String.Empty;
+
+                    if (directoryEntry.Properties.Contains(strMBR))
+                    {
+                        iMembers = directoryEntry.Properties[strMBR].Count;
+                        strEmpty = "NO";
+                    }
+                    else
+                    {
+                        iMembers = 0;
+                        strEmpty = "YES";
+                    }
+
+                    try
+                    {
+                        DirectoryEntry directoryParent = directoryEntry.Parent;
+
+                        while (0 != String.Compare(strTopContainer, directoryParent.Name, true))
+                        {
+                            strTempContainer = directoryParent.Name.Replace("OU=", String.Empty);
+                            strTempContainer = strTempContainer.Replace("CN=", String.Empty);
+                            strTempContainer = strTempContainer.Replace("~", String.Empty);
+                            stkContainers.Push(strTempContainer);
+
+                            directoryParent = directoryParent.Parent;
+                        }
+                    }
+                    catch (System.Runtime.InteropServices.COMException comExp)
+                    {
+                        strTempContainer = "ParentNotReachable";
+                        stkContainers.Push(strTempContainer);
+                    }
+
+
+                    if (stkContainers.Count > 0)
+                        strContainer1 = stkContainers.Pop();
+                    else
+                        strContainer1 = String.Empty;
+                    if (stkContainers.Count > 0)
+                        strContainer2 = stkContainers.Pop();
+                    else
+                        strContainer2 = String.Empty;
+                    if (stkContainers.Count > 0)
+                        strContainer3 = stkContainers.Pop();
+                    else
+                        strContainer3 = String.Empty;
+                    if (stkContainers.Count > 0)
+                        strContainer4 = stkContainers.Pop();
+                    else
+                        strContainer4 = String.Empty;
+                    if (stkContainers.Count > 0)
+                        strContainer5 = stkContainers.Pop();
+                    else
+                        strContainer5 = String.Empty;
+                    if (stkContainers.Count > 0)
+                        strContainer6 = stkContainers.Pop();
+                    else
+                        strContainer6 = String.Empty;
+                    if (stkContainers.Count > 0)
+                        strContainer7 = stkContainers.Pop();
+                    else
+                        strContainer7 = String.Empty;
+                    if (stkContainers.Count > 0)
+                        strContainer8 = stkContainers.Pop();
+                    else
+                        strContainer8 = String.Empty;
+
+                    //if (iLevels > iMaxLevel)
+                    //{
+                    //   Console.WriteLine("Max Level [" + iLevels.ToString() + "]");
+                    //   iMaxLevel = iLevels;
+                    //}
+
+                    sbMessage.Append(gp.DistinguishedName); sbMessage.Append("~"); sbMessage.Append(strEmpty); sbMessage.Append("~");
+                    sbMessage.Append(iMembers); sbMessage.Append("~");
+                    sbMessage.Append(strContainer1); sbMessage.Append("~"); sbMessage.Append(strContainer2); sbMessage.Append("~");
+                    sbMessage.Append(strContainer3); sbMessage.Append("~"); sbMessage.Append(strContainer4); sbMessage.Append("~");
+                    sbMessage.Append(strContainer5); sbMessage.Append("~"); sbMessage.Append(strContainer6); sbMessage.Append("~");
+                    sbMessage.Append(strContainer7); sbMessage.Append("~"); sbMessage.Append(strContainer8); sbMessage.Append("~");
+                    sbMessage.Append(gp.Name); sbMessage.Append("~"); sbMessage.Append(gp.SamAccountName); sbMessage.Append("~");
+                    sbMessage.Append(strGroupType); sbMessage.Append("~"); sbMessage.Append(strGroupScope); sbMessage.Append("~");
+                    sbMessage.Append(strGroupManagedBy); sbMessage.Append("~"); sbMessage.Append(strInformation); sbMessage.Append("~");
+                    sbMessage.Append(strDescription); sbMessage.Append("~"); sbMessage.Append(strWhenCreated); sbMessage.Append("~");
+                    sbMessage.Append(strWhenChanged); sbMessage.Append(Environment.NewLine);
+
+                    // Write membership records to the GroupAssignments file
+                    if (!File.Exists(strADGroups))
+                        File.WriteAllText(strADGroups, strColumnHeader);
+
+                    File.AppendAllText(strADGroups, sbMessage.ToString());
+
+                    sbMessage.Clear();
+
+                }
+            }
+            catch (Exception anyexp)
+            {
+                Console.WriteLine("Encountered root exception [" + anyexp.ToString() + "]");
+            }
+
+			srchGroup.Dispose();
+
+			ctx.Dispose();
+
+		}
+    }
+}

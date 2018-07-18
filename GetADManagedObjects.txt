@@ -1,0 +1,177 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.DirectoryServices;
+using System.DirectoryServices.AccountManagement;
+
+namespace GetSomeADObjects
+{
+    class Program
+    {
+        static String S_TILDE = "~";
+
+        static String m_strColumnHeader = "DN~ManagedObject" + Environment.NewLine;
+
+        static void Main(string[] args)
+        {
+            String strWorkingDirectory = Directory.GetCurrentDirectory();
+            String strUserFile = strWorkingDirectory + @"\UserInput.txt";
+            String strUserTracker = strWorkingDirectory + @"\UserTracker.txt";
+            String strADManagedObjects = strWorkingDirectory + @"\ADManagedObjects.txt";
+            String strConfigurationFile = strWorkingDirectory + @"\ConfigurationDetails.txt";
+
+            //Default Domain Controller
+            String strDomain = "";
+            String strRootSuffix = "";
+            String strUserAccount = "";
+            String strPassword = "";
+            Console.WriteLine("Current Working Directory is [" + strWorkingDirectory + "]");
+
+            // Read from the DomainController File to determine the DC to use
+            try
+            {   // Open the Group Tracker File and get 
+                using (StreamReader sr = new StreamReader(strConfigurationFile))
+                {
+                    // Read the stream to a string, and write the string to the console.
+                    strDomain = sr.ReadLine();
+                    strRootSuffix = sr.ReadLine();
+                    strUserAccount = sr.ReadLine();
+                    strPassword = sr.ReadLine();
+
+                    Console.WriteLine("Using DC [" + strDomain + "]");
+                    Console.WriteLine("Using root suffix [" + strRootSuffix + "]");
+                    Console.WriteLine("User Account [" + strUserAccount + "]");
+                    Console.WriteLine("Using Password [XXXXXXXXX]");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("The Configuration File could not be found");
+                throw (e);
+            }
+
+            // Read from the Group Tracker File to determine last processed user
+            int iLastUserProcessed = 0;
+
+            try
+            {   // Open the Group Tracker File and get 
+                using (StreamReader sr = new StreamReader(strUserTracker))
+                {
+                    // Read the stream to a string, and write the string to the console.
+                    String line = sr.ReadToEnd();
+                    iLastUserProcessed = Int32.Parse(line);
+
+                    Console.WriteLine("Group Tracking file found.  Last User Processed was [" + iLastUserProcessed.ToString() + "]");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("The User Tracking File could not be located.  Starting with User [1].");
+                iLastUserProcessed = 0;
+            }
+            // Connect to a Domain Controller
+            PrincipalContext ctx = new PrincipalContext(ContextType.Domain,
+                                            strDomain,
+                                            strRootSuffix,
+                                            ContextOptions.Negotiate);
+
+            String strMOBJ = "managedObjects";
+            
+            StringBuilder sbMessage = new StringBuilder();
+            Boolean bContinue = true;
+            Boolean bManagesSomething = false;
+            int iTotalUsers = 0;
+            String strUserToProcess = String.Empty;
+            UserPrincipal user = null;
+
+            if (!(File.Exists(strUserFile)))
+            {
+                Console.WriteLine("UserInput File could not be located at [" + strUserFile + "].  Exiting.");
+                bContinue = false;
+            }
+            else
+            {
+                iTotalUsers = File.ReadLines(strUserFile).Count();
+            }
+
+            // Write membership records to the ADManagedObjects file
+            if (!File.Exists(strADManagedObjects))
+                File.WriteAllText(strADManagedObjects, m_strColumnHeader);
+
+            while (bContinue)
+            {
+                // Read from the Group Input File and advance to next group to process
+                try
+                {   // Open the Group Tracker File and get 
+                    int iNextUserToProcess = iLastUserProcessed + 1;
+
+                    using (StreamReader sr = new StreamReader(strUserFile))
+                    {
+                        // Advance the reader to the next group to be processed
+                        for (int i = 1; i < iNextUserToProcess; i++)
+                        {
+                            sr.ReadLine();    // No care of what these values are just advancing the reader
+                        }
+
+                        strUserToProcess = sr.ReadLine();
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Reached the end of the Groups File.  We're done.");
+                    bContinue = false;
+                    continue;
+                }
+
+                if (null == strUserToProcess)
+                {
+                    Console.WriteLine("Reached the end of the Users File.  We're done.");
+                    bContinue = false;
+                    continue;
+                }
+                // We have a Group to Process.  Let's get the members now
+                user = UserPrincipal.FindByIdentity(ctx, IdentityType.DistinguishedName, strUserToProcess);
+
+                if (user != null)
+                {
+                    bManagesSomething = false;
+
+                    DirectoryEntry directoryEntry = user.GetUnderlyingObject() as DirectoryEntry;
+                    
+                    if (directoryEntry.Properties.Contains(strMOBJ))
+                        bManagesSomething = true;
+                   
+                    if(bManagesSomething)
+                    {
+                        foreach (string strManagedOBJ in directoryEntry.Properties[strMOBJ])
+                        {
+                            sbMessage.Append(user.DistinguishedName); sbMessage.Append(S_TILDE); sbMessage.Append(strManagedOBJ); sbMessage.Append(Environment.NewLine);
+
+                            File.AppendAllText(strADManagedObjects, sbMessage.ToString());
+
+                            sbMessage.Clear();
+                        }
+                    }
+
+                    user.Dispose();
+                }
+                else
+                {
+                    Console.WriteLine("Looks like this user is gone [" + strUserToProcess + "]");
+                }
+
+                // This group has been processed update the Group Tracker File to indicate.
+                // Write membership records to the file
+                iLastUserProcessed++;
+                File.WriteAllText(strUserTracker, Convert.ToString(iLastUserProcessed));    // Only a single number for this entire file
+
+            }
+
+            ctx.Dispose();
+
+        }
+    }
+}

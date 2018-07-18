@@ -1,0 +1,218 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.DirectoryServices.AccountManagement;
+using System.DirectoryServices;
+
+namespace GetGroups
+{
+    class Program
+    {
+        static String m_strColumnHeader = "GroupDN~MemberDN~AccountName~AccountType" + Environment.NewLine;
+
+        static void Main(string[] args)
+        {
+            String strWorkingDirectory = Directory.GetCurrentDirectory();
+            String strGroupFile = strWorkingDirectory + @"\GroupsInput.txt";
+            String strGroupTracker = strWorkingDirectory + @"\GroupTracker.txt";
+            String strGroupAssignments = strWorkingDirectory + @"\ADGroupsAssignments.txt";
+            String strConfigurationFile = strWorkingDirectory + @"\ConfigurationDetails.txt";
+
+            //Default Domain Controller
+            String strDomain = "";
+            String strRootSuffix = "";
+            String strUserAccount = "";
+            String strPassword = "";
+            Console.WriteLine("Current Working Directory is [" + strWorkingDirectory + "]");
+
+            // Read from the DomainController File to determine the DC to use
+            try
+            {   // Open the Group Tracker File and get 
+                using (StreamReader sr = new StreamReader(strConfigurationFile))
+                {
+                    // Read the stream to a string, and write the string to the console.
+                    strDomain = sr.ReadLine();
+                    strRootSuffix = sr.ReadLine();
+                    strUserAccount = sr.ReadLine();
+                    strPassword = sr.ReadLine();
+
+                    Console.WriteLine("Using DC [" + strDomain + "]");
+                    Console.WriteLine("Using root suffix [" + strRootSuffix + "]");
+                    Console.WriteLine("User Account [" + strUserAccount + "]");
+                    Console.WriteLine("Using Password [XXXXXXXXX]");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("The Configuration File could not be found");
+                throw (e);
+            }
+
+            int iLastGroupProcessed = 1;
+            String strGroupToProcess = "";
+            Boolean bContinue = true;
+
+            // Read from the Group Tracker File to determine last processed group
+            try
+            {   // Open the Group Tracker File and get 
+                using (StreamReader sr = new StreamReader(strGroupTracker))
+                {
+                    // Read the stream to a string, and write the string to the console.
+                    String line = sr.ReadToEnd();
+                    iLastGroupProcessed = Int32.Parse(line);
+
+                    Console.WriteLine("Group Tracking file found.  Last Group Processed was [" + iLastGroupProcessed.ToString() + "]");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("The Group Tracking File could not be located.  Starting with Group [1].");
+                iLastGroupProcessed = 0;
+            }
+
+            // Connect to a Domain Controller
+            PrincipalContext ctx = new PrincipalContext(ContextType.Domain,
+                                            strDomain,
+                                            strRootSuffix,
+                                            ContextOptions.Negotiate);
+
+
+            // create your principal searcher passing in the QBE principal    
+            //PrincipalSearcher srch = new PrincipalSearcher(qbeGroup);
+            GroupPrincipal grp = null;
+            String strMessage = null;
+            String strPrincipleType = null;
+            String strAccount = null;
+            int iTotalGroups = 0;
+
+            if (!(File.Exists(strGroupFile)))
+            {
+                Console.WriteLine("Group File could not be located at [" + strGroupFile + "].  Exiting.");
+                bContinue = false;
+            }
+            else
+            {
+                iTotalGroups = File.ReadLines(strGroupFile).Count();
+            }
+
+            while (bContinue)
+            {
+                // Read from the Group Input File and advance to next group to process
+                try
+                {   // Open the Group Tracker File and get 
+                    int iNextGroupToProcess = iLastGroupProcessed + 1;
+
+                    using (StreamReader sr = new StreamReader(strGroupFile))
+                    {
+                        // Advance the reader to the next group to be processed
+                        for (int i = 1; i < iNextGroupToProcess; i++)
+                        {
+                            sr.ReadLine();    // No care of what these values are just advancing the reader
+                        }
+
+                        strGroupToProcess = sr.ReadLine();
+
+                        /*
+                         * See if we need to provide an update to the console
+                        int iGroupLeftToProcess = iTotalGroups - iNextGroupToProcess;
+                        if (0 == (iGroupLeftToProcess%5))
+                        {
+                            int iPercent = iGroupLeftToProcess/iTotalGroups * 100;
+                            String strPercent = iPercent.ToString();
+
+                            Console.WriteLine("Currently at [" + strPercent + "]");
+                        }
+                         * */
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Reached the end of the Groups File.  We're done.");
+                    bContinue = false;
+                    continue;
+                }
+
+                if (null == strGroupToProcess)
+                {
+                    Console.WriteLine("Reached the end of the Groups File.  We're done.");
+                    bContinue = false;
+                    continue;
+                }
+                // We have a Group to Process.  Let's get the members now
+                grp = GroupPrincipal.FindByIdentity(ctx, IdentityType.DistinguishedName, strGroupToProcess);
+
+                if (grp != null)
+                {
+                    Console.WriteLine("Getting Members for Group [" + strGroupToProcess + "]");
+
+                    // PrincipalSearchResult<Principal> groupMembers = grp.GetMembers(true);
+                    PrincipalSearchResult<Principal> groupMembers = grp.GetMembers();
+                    var iterGroup = groupMembers.GetEnumerator();
+
+                    using (iterGroup)
+                    {
+                        Boolean bContinueMembers = true;
+
+                        while (bContinueMembers)
+                        {
+                            try
+                            {
+                                iterGroup.MoveNext();
+
+                                Principal p = iterGroup.Current;
+                                strAccount = p.SamAccountName;
+
+                                //Check Principle Type
+                                if (p is UserPrincipal)
+                                    strPrincipleType = "User";
+                                else if (p is GroupPrincipal)
+                                    strPrincipleType = "Group";
+                                else if (p is ComputerPrincipal)
+                                    strPrincipleType = "Computer";
+                                else
+                                    strPrincipleType = "UnKnown";
+
+                                strMessage = grp.DistinguishedName + "~" + grp.Name + "~" + p.DistinguishedName + "~" + strAccount + "~" + strPrincipleType + Environment.NewLine;
+
+                                // Write membership records to the GroupAssignments file
+                                if (!File.Exists(strGroupAssignments))
+                                    File.WriteAllText(strGroupAssignments, m_strColumnHeader);
+
+                                File.AppendAllText(strGroupAssignments, strMessage);
+                            }
+                            catch (PrincipalOperationException exp)
+                            {
+                                // Failed to locate the actual member record in Active Directory
+                                // Continue to get the remaining members
+                                continue;
+                            }
+                            catch (Exception exp)
+                            {
+                                Console.WriteLine(exp.ToString());
+                                bContinueMembers = false;
+                            }
+                        }
+                    }
+
+                    // This group has been processed update the Group Tracker File to indicate.
+                    // Write membership records to the file
+                    grp.Dispose();
+                }
+                else
+                {
+                    // The groups is not found
+                    Console.WriteLine("Looks like this group is gone [" + strGroupToProcess + "]");
+                }
+
+                iLastGroupProcessed++;
+                File.WriteAllText(strGroupTracker, Convert.ToString(iLastGroupProcessed));    // Only a single number for this entire file
+            }
+
+            ctx.Dispose();
+
+        }
+    }
+}
