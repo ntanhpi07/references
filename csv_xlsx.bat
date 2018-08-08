@@ -1,2 +1,0 @@
-FOR %%X in (".\*.csv") DO IF NOT %%~xX == .xlsx echo Converting "%%~dpnxX"  & reg delete HKEY_CURRENT_USER\Software\Microsoft\Office\14.0\Excel\Resiliency\StartupItems /f & "C:\Program Files (x86)\Microsoft Office\Office14\excelcnv.exe"  -nme -oice "%%~dpnxX" "%%~dpnX.xlsx" 
-pause
